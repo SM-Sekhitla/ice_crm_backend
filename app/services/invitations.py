@@ -3,7 +3,6 @@
 import asyncio
 import base64
 import hashlib
-import html
 import logging
 import smtplib
 from datetime import timedelta
@@ -20,6 +19,7 @@ from app.db.models import RefreshToken, Sender, User, UserInvitation
 from app.db.session import SessionLocal
 from app.services.common import audit
 from app.services.email import DeliveryRejected, brevo_send
+from app.services.email_templates import invitation_email
 
 logger = logging.getLogger("crm.invitations")
 INVALID_LINK = (
@@ -189,12 +189,12 @@ async def process_invitation():
             record.delivery_reason = "Invitation token unavailable; resend the invitation"
             record.encrypted_token = None
             return True
-        url = html.escape(invitation_url(token), quote=True)
-        body = (
-            f"<p>Hello {html.escape(user.first_name)},</p><p>You have been invited to ICE CRM.</p>"
-            f'<p><a href="{url}">Set your password and log in</a></p>'
-            "<p>This link is for your account only and can be used once. "
-            f"It expires in {get_settings().invitation_expiry_hours} hours.</p>"
+        settings = get_settings()
+        body = invitation_email(
+            user.first_name,
+            invitation_url(token),
+            settings.frontend_base_url,
+            settings.invitation_expiry_hours,
         )
         email, record_id = user.email, record.id
         record.delivery_status = "Dispatching"

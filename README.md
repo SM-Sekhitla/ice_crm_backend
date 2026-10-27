@@ -275,3 +275,10 @@ Brevo campaign senders are not restricted to BREVO_FROM_EMAIL. The selected CRM 
 In Compose or the launch confirmation, use **Prepare images for Brevo**. Download each detected image, upload it to your Brevo Content library or website, and paste its direct public HTTPS image URL. The CRM replaces only the image sources, preserves inline formatting, updates the saved signature through `PUT /signatures/{id}`, and saves the campaign draft. Previously submitted campaign snapshots remain unchanged. The final launch is still a separate confirmed action.
 
 The API does not pretend an ordinary attachment is an inline CID image. Brevo's [image gallery API](https://developers.brevo.com/reference/upload-image-to-gallery) takes an existing public image URL, not a local/base64 file. In local development, the CRM cannot create a public HTTPS URL for an uploaded image automatically. Use the provider's [Content library upload](https://help.brevo.com/hc/en-us/articles/4504463584786-Add-and-manage-images-in-the-Content-library) or your own image hosting, then supply the direct URL. URL format checks do not verify that a remote file is reachable. The server never fetches arbitrary image URLs.
+
+
+## Invitation email design
+
+Account invitations use the branded HTML template in `app/services/email_templates.py` for both Brevo and SMTP. The template includes a dark header, an account setup button (with an Outlook fallback), a copyable activation link, and single-use/expiry information. Layout tables and inline styles support email clients; narrow screens use smaller spacing.
+
+Set `FRONTEND_BASE_URL` to the public HTTPS frontend address. The header loads the original white company logo from `/brand/ice-logo.png` on that frontend, without embedded images or attachments. Local HTTP development omits the remote logo and retains the CRM text header. Email clients may block remote images; the setup instructions and button remain usable. Deploy the backend change and restart the email worker to use the new template for subsequent invitations. Campaign content and saved signatures are unchanged.
