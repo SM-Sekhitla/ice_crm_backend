@@ -19,6 +19,7 @@ from app.db.models import (
     User,
 )
 from app.services.common import audit, serialize
+from app.services.email import DeliveryRejected, validate_provider_message
 from app.services.email_html import personalize, sanitize_html
 
 router = APIRouter(tags=["Campaigns"])
@@ -106,6 +107,25 @@ async def create_signature(body: SignatureInput, session: Session, user=Depends(
     return serialize(record)
 
 
+@router.put("/signatures/{signature_id}")
+async def update_signature(
+    signature_id: str, body: SignatureInput, session: Session, user=Depends(require("campaigns.manage"))
+):
+    await signature_record(session, user, signature_id)
+    record = await session.scalar(select(Signature).where(Signature.id == signature_id).with_for_update())
+    if not record:
+        raise HTTPException(404, "Signature not found")
+    clean = sanitize_html(body.html)
+    if not clean.strip():
+        raise HTTPException(422, "Signature has no visible content")
+    record.name = body.name
+    record.html = clean
+    record.source_file_name = body.source_file_name
+    audit(session, user, "Updated saved email signature; submitted campaign snapshots retained")
+    await session.flush()
+    return serialize(record)
+
+
 @router.delete("/signatures/{signature_id}", status_code=204)
 async def delete_signature(signature_id: str, session: Session, user=Depends(require("campaigns.manage"))):
     record = await signature_record(session, user, signature_id)
@@ -120,7 +140,10 @@ async def senders(session: Session, user: CurrentUser):
     query = select(Sender)
     if user.role != ADMIN:
         query = query.where(Sender.user_ids.contains([user.id]))
-    return [serialize(r) for r in await session.scalars(query)]
+    return [
+        {**serialize(r), "provider": get_settings().email_provider.upper()}
+        for r in await session.scalars(query)
+    ]
 
 
 async def sender_values(session, body):
@@ -138,7 +161,7 @@ async def sender_values(session, body):
 
 @router.post("/senders", status_code=201)
 async def create_sender(body: SenderInput, session: Session, user=Depends(require("email_config.manage"))):
-    record = Sender(**await sender_values(session, body))
+    record = Sender(**await sender_values(session, body), provider=get_settings().email_provider.upper())
     session.add(record)
     audit(session, user, "Created sender configuration")
     await session.flush()
@@ -306,8 +329,16 @@ async def launch(campaign_id: str, body: Launch, session: Session, user=Depends(
     sender = await session.get(Sender, record.sender_id)
     if sender.status != "Verified":
         raise HTTPException(422, "Sender must be verified by an administrator")
-    if body.mode == "smtp" and not get_settings().email_delivery_enabled:
-        raise HTTPException(409, "Real email delivery is disabled")
+    if body.mode == "email":
+        if not get_settings().email_delivery_enabled:
+            raise HTTPException(409, "Real email delivery is disabled")
+        signature = (
+            await signature_record(session, owner, record.signature_id) if record.signature_id else None
+        )
+        try:
+            validate_provider_message(sender, record.body_html + (signature.html if signature else ""))
+        except DeliveryRejected as exc:
+            raise HTTPException(422, str(exc)) from exc
     if body.scheduled_at and body.scheduled_at <= now():
         raise HTTPException(422, "Schedule must be in the future")
     record.mode = body.mode
@@ -380,5 +411,5 @@ async def analytics(campaign_id: str, session: Session, user=Depends(require("ca
         "counts": dict(rows.all()),
         "opens": None,
         "clicks": None,
-        "note": "Accepted means SMTP accepted the message, not confirmed inbox delivery.",
+        "note": "Accepted means the configured provider accepted the message, not confirmed inbox delivery.",
     }

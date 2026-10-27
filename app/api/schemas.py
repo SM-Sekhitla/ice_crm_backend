@@ -44,12 +44,12 @@ class UserCreate(Schema):
     first_name: str = Field(min_length=1, max_length=100)
     last_name: str = Field(min_length=1, max_length=100)
     email: EmailStr
-    password: str = Field(min_length=12, max_length=128)
     role: Literal["Super Admin", "BDO"] = "BDO"
     product_ids: list[str] = Field(default_factory=list, max_length=100)
 
 
 class UserUpdate(Schema):
+    email: EmailStr | None = None
     first_name: str = Field(min_length=1, max_length=100)
     last_name: str = Field(min_length=1, max_length=100)
     role: Literal["Super Admin", "BDO"]
@@ -197,7 +197,13 @@ class CampaignInput(Schema):
 
 
 class Launch(Schema):
-    mode: Literal["simulation", "smtp"] = "simulation"
+    mode: Literal["simulation", "email"] = "simulation"
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def legacy_live_mode(cls, value):
+        return "email" if value == "smtp" else value
+
     scheduled_at: datetime | None = None
     confirm: Literal[True]
 
@@ -241,3 +247,22 @@ class BulkDelete(Schema):
 
 class FollowUpStatus(Schema):
     status: Literal["Open", "Completed"]
+
+
+class InvitationToken(Schema):
+    token: str = Field(min_length=32, max_length=200)
+
+
+class InvitationAccept(InvitationToken):
+    password: str = Field(min_length=12, max_length=128)
+    confirm_password: str = Field(min_length=12, max_length=128)
+
+    @model_validator(mode="after")
+    def passwords_match(self):
+        if self.password != self.confirm_password:
+            raise ValueError("Passwords do not match")
+        return self
+
+
+class UserDelete(Schema):
+    replacement_owner_id: str | None = None

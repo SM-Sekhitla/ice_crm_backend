@@ -36,7 +36,10 @@ class User(Record, Base):
     password_hash: Mapped[str] = mapped_column(Text)
     role: Mapped[str] = mapped_column(String(30), default="BDO")
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     token_version: Mapped[int] = mapped_column(default=0)
+    password_set: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
 
 
 class RefreshToken(Record, Base):
@@ -207,3 +210,17 @@ class AudienceSegment(Record, Base):
     product_id: Mapped[str] = mapped_column(ForeignKey("products.id"))
     created_by: Mapped[str] = mapped_column(ForeignKey("users.id"))
     contact_ids: Mapped[list] = mapped_column(JSONB, default=list)
+
+
+class UserInvitation(Record, Base):
+    __tablename__ = "user_invitations"
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    digest: Mapped[str] = mapped_column(String(64), unique=True)
+    encrypted_token: Mapped[str | None] = mapped_column(Text)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked: Mapped[bool] = mapped_column(Boolean, default=False)
+    delivery_status: Mapped[str] = mapped_column(String(20), default="Queued", index=True)
+    delivery_reason: Mapped[str] = mapped_column(String(500), default="")
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

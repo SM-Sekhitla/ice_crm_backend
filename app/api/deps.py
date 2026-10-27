@@ -22,7 +22,13 @@ async def current_user(
     except ValueError:
         raise HTTPException(401, "Invalid or expired access token", headers={"WWW-Authenticate": "Bearer"})
     user = await session.get(User, payload["sub"])
-    if not user or not user.active or user.token_version != payload["ver"]:
+    if (
+        not user
+        or not user.active
+        or user.deleted_at is not None
+        or not user.password_set
+        or user.token_version != payload["ver"]
+    ):
         raise HTTPException(401, "Account or session is inactive")
     return user
 

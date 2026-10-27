@@ -5,6 +5,7 @@ from sqlalchemy import select
 
 from app.api.auth import user_response
 from app.api.deps import CurrentUser, Session, association_scope
+from app.core.config import get_settings
 from app.core.permissions import ADMIN
 from app.db.models import (
     Activity,
@@ -21,6 +22,7 @@ from app.db.models import (
     Sender,
     Signature,
     User,
+    UserInvitation,
 )
 from app.services.common import serialize
 
@@ -62,12 +64,42 @@ async def workspace(session: Session, user: CurrentUser):
             True if admin else (Activity.user_id == user.id) & Activity.product_id.in_(product_ids)
         ),
     }
-    data = {"version": 1}
+    settings = get_settings()
+    data = {
+        "version": 1,
+        "emailProvider": settings.email_provider,
+        "emailDeliveryEnabled": settings.email_delivery_enabled,
+        "brevoFromEmail": settings.brevo_from_email,
+        "brevoFromName": settings.brevo_from_name,
+    }
     for name, query in records.items():
         data[name] = [serialize(record) for record in await session.scalars(query)]
+    for sender in data["senders"]:
+        sender["provider"] = settings.email_provider.upper()
     if admin:
         people = list(await session.scalars(select(User).order_by(User.email)))
         data["users"] = [await user_response(session, person) for person in people]
+        invitations = list(
+            await session.execute(
+                select(
+                    UserInvitation.user_id,
+                    UserInvitation.delivery_status,
+                    UserInvitation.delivery_reason,
+                    UserInvitation.expires_at,
+                )
+                .where(UserInvitation.revoked.is_(False))
+                .order_by(UserInvitation.created_at.desc())
+            )
+        )
+        latest = {}
+        for invitation in invitations:
+            latest.setdefault(invitation.user_id, invitation)
+        for person in data["users"]:
+            invitation = latest.get(person["id"])
+            if invitation and not person["passwordSet"]:
+                person["invitationStatus"] = invitation.delivery_status
+                person["invitationReason"] = invitation.delivery_reason
+                person["invitationExpiresAt"] = invitation.expires_at
     else:
         # Only the logged-in identity is needed for BDO edits. Do not expose the staff directory.
         data["users"] = [await user_response(session, user)]

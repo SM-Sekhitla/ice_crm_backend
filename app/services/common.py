@@ -8,7 +8,7 @@ def serialize(record):
     return {
         to_camel(col.key): getattr(record, col.key)
         for col in inspect(record).mapper.column_attrs
-        if col.key not in {"password_hash", "token_version", "digest"}
+        if col.key not in {"password_hash", "token_version", "digest", "encrypted_token"}
     }
 
 

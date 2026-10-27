@@ -13,12 +13,16 @@ from app.api import admin, auth, campaigns, crm, imports, workspace
 from app.core.config import get_settings
 from app.db.session import engine
 from app.middleware.security import SecurityMiddleware
+from app.services.bootstrap import ensure_initial_admin
 
 
 @asynccontextmanager
 async def lifespan(app):
-    yield
-    await engine.dispose()
+    try:
+        await ensure_initial_admin()
+        yield
+    finally:
+        await engine.dispose()
 
 
 def create_app():

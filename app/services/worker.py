@@ -1,7 +1,7 @@
 """Durable PostgreSQL queue. Run separately: python -m app.services.worker.
 
-Dispatching is committed BEFORE external SMTP. Crashed sends become Unknown and
-are never retried automatically: SMTP cannot guarantee exactly-once delivery.
+Dispatching is committed BEFORE external delivery. Crashed sends become Unknown
+and are never retried automatically, to avoid duplicate messages.
 """
 
 import asyncio
@@ -21,7 +21,9 @@ from app.core.config import get_settings
 from app.core.security import now
 from app.db.models import Campaign, Product, Recipient, Sender, User
 from app.db.session import SessionLocal, engine
+from app.services.email import DeliveryRejected, brevo_send
 from app.services.email_html import personalize, sanitize_html
+from app.services.invitations import process_invitation, recover_invitation_dispatches
 
 logger = logging.getLogger("crm.worker")
 
@@ -138,15 +140,32 @@ async def process_one():
         subject = subject.replace("\r", "").replace("\n", "")
         body = sanitize_html(personalize(campaign.body_html + campaign.signature_html, recipient.tokens))
         # Sender attributes remain usable after the transaction (expire_on_commit=False).
+    provider = get_settings().email_provider
     try:
-        await asyncio.to_thread(smtp_send, sender, email, subject, body, recipient_id)
-        status, reason = "Accepted", "SMTP server accepted message"
+        if not get_settings().email_delivery_enabled:
+            raise DeliveryRejected("Email delivery is disabled")
+        if provider == "brevo":
+            message_id = await brevo_send(sender, email, subject, body, recipient_id)
+            reason = f"Brevo accepted message; messageId={message_id}"
+        else:
+            await asyncio.to_thread(smtp_send, sender, email, subject, body, recipient_id)
+            reason = "SMTP server accepted message"
+        status = "Accepted"
+    except DeliveryRejected as exc:
+        status, reason = "Failed", str(exc)
     except smtplib.SMTPRecipientsRefused:
         status, reason = "Failed", "SMTP rejected recipient"
-    except Exception:
-        # A timeout after DATA may mean the server accepted it. Never auto-retry.
-        logger.exception("SMTP send failed recipient_id=%s", recipient_id)
-        status, reason = "Unknown", "SMTP outcome uncertain; inspect provider logs before manual action"
+    except Exception as exc:
+        logger.warning(
+            "Uncertain send provider=%s recipient_id=%s error_type=%s",
+            provider,
+            recipient_id,
+            type(exc).__name__,
+        )
+        status, reason = (
+            "Unknown",
+            f"{provider.upper()} outcome uncertain; inspect provider logs before manual action",
+        )
     async with SessionLocal() as session, session.begin():
         record = await session.get(Recipient, recipient_id)
         record.status = status
@@ -166,20 +185,31 @@ async def recover_stale():
         )
         for record in records:
             record.status = "Unknown"
-            record.reason = "Worker interrupted during SMTP; inspect provider logs before manual action"
+            record.reason = (
+                "Worker interrupted during email delivery; inspect provider logs before manual action"
+            )
 
 
 async def main():
     logging.basicConfig(level=logging.INFO)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, stop.set)
+    signals = [signal.SIGINT, signal.SIGTERM]
+    if hasattr(signal, "SIGBREAK"):
+        signals.append(signal.SIGBREAK)
+    for sig in signals:
+        try:
+            loop.add_signal_handler(sig, stop.set)
+        except NotImplementedError:
+            # Windows event loops use ordinary process signal handlers.
+            signal.signal(sig, lambda signum, frame: loop.call_soon_threadsafe(stop.set))
     try:
         while not stop.is_set():
             try:
                 await recover_stale()
-                worked = await process_one()
+                await recover_invitation_dispatches()
+                invited = await process_invitation()
+                worked = await process_one() or invited
             except Exception:
                 logger.exception("Queue processing failed")
                 worked = False

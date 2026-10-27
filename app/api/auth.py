@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Response
 from sqlalchemy import select, update
 
 from app.api.deps import CurrentUser, Session
-from app.api.schemas import Login, PasswordChange, Refresh
+from app.api.schemas import InvitationAccept, InvitationToken, Login, PasswordChange, Refresh
 from app.core.config import get_settings
 from app.core.security import access_token, hash_password, now, opaque_token, token_hash, verify_password
 from app.db.models import Assignment, RefreshToken, User
@@ -49,7 +49,7 @@ async def login(body: Login, session: Session, response: Response):
     valid = await asyncio.to_thread(
         verify_password, body.password, user.password_hash if user else DUMMY_HASH
     )
-    if not valid or not user or not user.active:
+    if not valid or not user or not user.active or user.deleted_at is not None or not user.password_set:
         raise HTTPException(401, "Invalid email or password")
     audit(session, user, "Signed in")
     return await issue(session, user)
@@ -64,7 +64,7 @@ async def refresh(body: Refresh, session: Session, response: Response):
     if not token or token.revoked or token.expires_at <= now():
         raise HTTPException(401, "Invalid or expired refresh token")
     user = await session.get(User, token.user_id)
-    if not user or not user.active:
+    if not user or not user.active or user.deleted_at is not None or not user.password_set:
         raise HTTPException(401, "Inactive account")
     token.revoked = True
     return await issue(session, user)
@@ -90,3 +90,25 @@ async def password(body: PasswordChange, user: CurrentUser, session: Session):
     user.token_version += 1
     await session.execute(update(RefreshToken).where(RefreshToken.user_id == user.id).values(revoked=True))
     audit(session, user, "Changed password; sessions revoked")
+
+
+@router.post("/invitations/verify")
+async def verify_account_invitation(body: InvitationToken, session: Session):
+    from app.services.invitations import verify_invitation
+
+    await verify_invitation(session, body.token)
+    return {"valid": True}
+
+
+@router.post("/invitations/accept")
+async def accept_account_invitation(body: InvitationAccept, session: Session, response: Response):
+    from app.services.invitations import accept_invitation
+
+    response.headers["Cache-Control"] = "no-store"
+    user = await accept_invitation(session, body.token, body.password)
+    return await issue(session, user)
+
+
+@router.post("/onboarding/complete", status_code=204)
+async def complete_onboarding(user: CurrentUser, session: Session):
+    user.onboarding_completed = True

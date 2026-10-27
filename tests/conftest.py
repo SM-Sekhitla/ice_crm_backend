@@ -5,6 +5,14 @@ os.environ["DATABASE_URL"] = os.environ.get(
     "TEST_DATABASE_URL", "postgresql+asyncpg://hlaks@127.0.0.1:55439/crm_test"
 )
 os.environ["AUTH_RATE_LIMIT"] = "10000"
+os.environ["ALLOWED_HOSTS"] = '["localhost", "127.0.0.1", "testserver"]'
+os.environ["CORS_ORIGINS"] = '["http://localhost:5173", "http://127.0.0.1:5173"]'
+os.environ["SMTP_SSL"] = "false"
+os.environ["SMTP_STARTTLS"] = "true"
+os.environ["EMAIL_PROVIDER"] = "smtp"
+os.environ["EMAIL_DELIVERY_ENABLED"] = "false"
+os.environ["DEFAULT_PLATFORM_ADMIN_EMAIL"] = ""
+os.environ["DEFAULT_PLATFORM_ADMIN_PASSWORD"] = ""
 if not os.environ["DATABASE_URL"].endswith("/crm_test"):
     raise RuntimeError("Tests require a dedicated database named crm_test")
 
