@@ -297,3 +297,9 @@ Configured credentials and common token/password/email/URL patterns are redacted
 Each process uses a bounded 2,000-event queue. Overflow reports a dropped-event warning; shutdown drains for up to three seconds. Logging writes have independent 500ms transaction limits, exclude their own diagnostics to prevent recursion, and cannot trigger mail retries on storage failure. Retention is seven days, with expired entries hidden immediately and pruned on writes at most hourly per process.
 
 Coverage is the application's API and worker runtimes. Render build logs, Docker daemon/container platform events, arbitrary stdout/stderr prints, host OS logs, PostgreSQL server logs, and failures before application logging starts are available in hosting/service consoles, not streamed into this page. Raw external log-file access is not exposed through the API.
+
+## Single-service Docker deployment
+
+The default Docker command applies migrations, then runs `start_services.py` to supervise both the API and invitation/campaign email worker. On Render, leave Docker Command empty and deploy the backend image. No separate worker service is needed for this setup. Both processes inherit the same database, SECRET_KEY and provider configuration. If either process exits, the supervisor stops the other and exits with a failure so the service can restart. SIGTERM shuts both processes down.
+
+Do not also deploy a separate worker unless intentionally running additional queue consumers. Docker Compose keeps its existing separate API/worker layout because its explicit commands override the Dockerfile default. Manual `python -m app` remains API-only; the development runner still starts both processes. Existing queued invitations are picked up when the worker starts, subject to their expiry. Check Administration → Backend logs for `worker_started`, `invitation_delivery`, or `worker_error`.
