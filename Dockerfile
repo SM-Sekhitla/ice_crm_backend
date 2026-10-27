@@ -5,4 +5,5 @@ RUN pip install --no-cache-dir -r requirements.txt && useradd --create-home crm
 COPY --chown=crm:crm . .
 USER crm
 EXPOSE 5002
-CMD ["python", "-m", "app"]
+# Apply the schema before API startup and initial administrator creation.
+CMD ["/bin/sh", "-c", "python -m alembic upgrade head && exec python -m app"]
