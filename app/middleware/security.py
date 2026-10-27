@@ -10,6 +10,7 @@ from collections import defaultdict, deque
 from uuid import uuid4
 
 from app.core.config import get_settings
+from app.services.backend_logs import record_backend_log
 
 logger = logging.getLogger("crm.requests")
 
@@ -34,6 +35,14 @@ class SecurityMiddleware:
             oversized = True
 
         async def reject(code, message, extra=None):
+            await record_backend_log(
+                "http_request",
+                level="WARNING",
+                request_id=request_id,
+                method=scope["method"],
+                status_code=code,
+                duration_ms=(time.monotonic() - started) * 1000,
+            )
             await send(
                 {
                     "type": "http.response.start",
@@ -86,8 +95,13 @@ class SecurityMiddleware:
                 return {"type": "http.request", "body": b"".join(chunks), "more_body": False}
             return await receive()
 
+        status_code = 500
+        error_type = None
+
         async def wrapped_send(message):
+            nonlocal status_code
             if message["type"] == "http.response.start":
+                status_code = message["status"]
                 message["headers"] = list(message.get("headers", [])) + [
                     (b"x-request-id", request_id.encode()),
                     (b"x-content-type-options", b"nosniff"),
@@ -103,7 +117,25 @@ class SecurityMiddleware:
 
         try:
             await self.app(scope, replay, wrapped_send)
+        except Exception as error:
+            error_type = type(error).__name__
+            raise
         finally:
+            route = getattr(scope.get("route"), "path", None)
+            if not scope["path"].startswith("/health/") and (
+                route != "/api/v1/admin/backend-logs" or status_code >= 400
+            ):
+                await record_backend_log(
+                    "http_request",
+                    level="ERROR" if status_code >= 500 else "WARNING" if status_code >= 400 else "INFO",
+                    request_id=request_id,
+                    method=scope["method"],
+                    route=route,
+                    module=getattr(scope.get("endpoint"), "__module__", None),
+                    status_code=status_code,
+                    duration_ms=(time.monotonic() - started) * 1000,
+                    error_type=error_type,
+                )
             logger.info(
                 "request=%s method=%s duration_ms=%.1f",
                 request_id,

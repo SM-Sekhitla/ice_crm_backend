@@ -3,10 +3,13 @@ from decimal import Decimal
 from uuid import uuid4
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
+    Index,
     Numeric,
     String,
     Text,
@@ -224,3 +227,29 @@ class UserInvitation(Record, Base):
     delivery_status: Mapped[str] = mapped_column(String(20), default="Queued", index=True)
     delivery_reason: Mapped[str] = mapped_column(String(500), default="")
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class BackendLog(Base):
+    __tablename__ = "backend_logs"
+    __table_args__ = (
+        Index("ix_backend_logs_service_id", "service", "id"),
+        Index("ix_backend_logs_module_id", "module", "id"),
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    source: Mapped[str] = mapped_column(String(20))
+    level: Mapped[str] = mapped_column(String(10))
+    event: Mapped[str] = mapped_column(String(40))
+    message: Mapped[str] = mapped_column(String(2000))
+    module: Mapped[str | None] = mapped_column(String(120))
+    service: Mapped[str | None] = mapped_column(String(32))
+    details: Mapped[str | None] = mapped_column(Text)
+    request_id: Mapped[str | None] = mapped_column(String(36))
+    method: Mapped[str | None] = mapped_column(String(10))
+    route: Mapped[str | None] = mapped_column(String(200))
+    status_code: Mapped[int | None] = mapped_column()
+    duration_ms: Mapped[float | None] = mapped_column(Float)
+    error_type: Mapped[str | None] = mapped_column(String(100))
+    outcome: Mapped[str | None] = mapped_column(String(20))

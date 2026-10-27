@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     allowed_hosts: list[str] = ["localhost", "127.0.0.1", "testserver"]
     request_max_bytes: int = 2_000_000
     auth_rate_limit: int = 20
+    backend_log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     default_platform_admin_email: str = ""
     default_platform_admin_password: SecretStr = Field(default_factory=lambda: SecretStr(""), repr=False)
     default_platform_admin_username: str = Field(default="Platform Admin", max_length=200)

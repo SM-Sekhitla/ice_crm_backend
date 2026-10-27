@@ -9,18 +9,28 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from app.api import admin, auth, campaigns, crm, imports, workspace
+from app.api import admin, auth, backend_logs, campaigns, crm, imports, workspace
 from app.core.config import get_settings
 from app.db.session import engine
 from app.middleware.security import SecurityMiddleware
+from app.services.backend_logs import record_backend_log
 from app.services.bootstrap import ensure_initial_admin
+from app.services.runtime_logging import RuntimeLogCapture
 
 
 @asynccontextmanager
 async def lifespan(app):
     try:
-        await ensure_initial_admin()
-        yield
+        async with RuntimeLogCapture("api"):
+            try:
+                await ensure_initial_admin()
+                await record_backend_log("api_started")
+                yield
+            except Exception:
+                logging.getLogger("crm.lifecycle").exception("API lifecycle failure")
+                raise
+            finally:
+                await record_backend_log("api_stopped")
     finally:
         await engine.dispose()
 
@@ -64,10 +74,18 @@ def create_app():
         except Exception:
             return JSONResponse(status_code=503, content={"status": "unavailable"})
 
-    for router in (auth.router, admin.router, imports.router, crm.router, campaigns.router, workspace.router):
+    for router in (
+        auth.router,
+        backend_logs.router,
+        admin.router,
+        imports.router,
+        crm.router,
+        campaigns.router,
+        workspace.router,
+    ):
         app.include_router(router, prefix="/api/v1")
-    app.add_middleware(SecurityMiddleware)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts)
+    app.add_middleware(SecurityMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,

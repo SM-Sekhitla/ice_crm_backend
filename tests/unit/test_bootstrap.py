@@ -113,6 +113,8 @@ class BootstrapTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(main, "ensure_initial_admin", new_callable=AsyncMock) as ensure,
             patch.object(main, "engine", SimpleNamespace(dispose=dispose)),
+            patch.object(main, "record_backend_log", new_callable=AsyncMock),
+            patch.object(main, "RuntimeLogCapture", return_value=Context()),
         ):
             async with main.lifespan(main.app):
                 ensure.assert_awaited_once()

@@ -17,6 +17,7 @@ from app.core.config import get_settings
 from app.core.security import hash_password, now, opaque_token, token_hash
 from app.db.models import RefreshToken, Sender, User, UserInvitation
 from app.db.session import SessionLocal
+from app.services.backend_logs import record_backend_log
 from app.services.common import audit
 from app.services.email import DeliveryRejected, brevo_send
 from app.services.email_templates import invitation_email
@@ -221,6 +222,12 @@ async def process_invitation():
         record.delivery_reason = reason
         record.encrypted_token = None
         record.processed_at = now()
+    await record_backend_log(
+        "invitation_delivery",
+        source="worker",
+        level="ERROR" if status in {"Failed", "Unknown"} else "INFO",
+        outcome=status,
+    )
     return True
 
 

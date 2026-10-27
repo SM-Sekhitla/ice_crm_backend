@@ -21,9 +21,11 @@ from app.core.config import get_settings
 from app.core.security import now
 from app.db.models import Campaign, Product, Recipient, Sender, User
 from app.db.session import SessionLocal, engine
+from app.services.backend_logs import record_backend_log
 from app.services.email import DeliveryRejected, brevo_send
 from app.services.email_html import personalize, sanitize_html
 from app.services.invitations import process_invitation, recover_invitation_dispatches
+from app.services.runtime_logging import RuntimeLogCapture
 
 logger = logging.getLogger("crm.worker")
 
@@ -171,6 +173,12 @@ async def process_one():
         record.status = status
         record.reason = reason
         record.processed_at = now()
+    await record_backend_log(
+        "campaign_delivery",
+        source="worker",
+        level="ERROR" if status in {"Failed", "Unknown"} else "INFO",
+        outcome=status,
+    )
     return True
 
 
@@ -190,8 +198,8 @@ async def recover_stale():
             )
 
 
-async def main():
-    logging.basicConfig(level=logging.INFO)
+async def run_worker():
+    await record_backend_log("worker_started", source="worker")
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     signals = [signal.SIGINT, signal.SIGTERM]
@@ -210,14 +218,26 @@ async def main():
                 await recover_invitation_dispatches()
                 invited = await process_invitation()
                 worked = await process_one() or invited
-            except Exception:
+            except Exception as error:
                 logger.exception("Queue processing failed")
+                await record_backend_log(
+                    "worker_error", source="worker", level="ERROR", error_type=type(error).__name__
+                )
                 worked = False
             if not worked:
                 try:
                     await asyncio.wait_for(stop.wait(), timeout=2)
                 except TimeoutError:
                     pass
+    finally:
+        await record_backend_log("worker_stopped", source="worker")
+
+
+async def main():
+    logging.basicConfig(level=logging.INFO)
+    try:
+        async with RuntimeLogCapture("worker"):
+            await run_worker()
     finally:
         await engine.dispose()
 

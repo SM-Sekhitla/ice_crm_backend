@@ -82,6 +82,7 @@ class InvitationTests(unittest.IsolatedAsyncioTestCase):
             delivery_status="Queued",
         )
         self.patches = [
+            patch.object(invitations, "record_backend_log", new_callable=AsyncMock),
             patch.object(invitations, "get_settings", return_value=self.settings),
             patch.object(invitations, "SessionLocal", self.factory),
         ]

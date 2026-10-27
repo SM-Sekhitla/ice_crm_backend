@@ -282,3 +282,18 @@ The API does not pretend an ordinary attachment is an inline CID image. Brevo's 
 Account invitations use the branded HTML template in `app/services/email_templates.py` for both Brevo and SMTP. The template includes a dark header, an account setup button (with an Outlook fallback), a copyable activation link, and single-use/expiry information. Layout tables and inline styles support email clients; narrow screens use smaller spacing.
 
 Set `FRONTEND_BASE_URL` to the public HTTPS frontend address. The header loads the original white company logo from `/brand/ice-logo.png` on that frontend, without embedded images or attachments. Local HTTP development omits the remote logo and retains the CRM text header. Email clients may block remote images; the setup instructions and button remain usable. Deploy the backend change and restart the email worker to use the new template for subsequent invitations. Campaign content and saved signatures are unchanged.
+
+
+## Super Admin backend and system logs
+
+**Administration → Backend logs** combines structured requests with application/framework runtime logger events from API and email worker processes. Super Admin authorization is enforced by `logs.view` on `GET /api/v1/admin/backend-logs`; BDOs cannot access the endpoint. Filters include service (`api` / `email-worker`), Python module/logger name, category (all, requests, system, delivery), severity, text and a stable ID cursor. The eye action opens the message, metadata and sanitized exception stack frames. All times in the UI use Africa/Johannesburg. Auto-refresh updates the newest page every 15 seconds.
+
+Apply migrations through `e02a3404d005` with `python -m alembic upgrade head`, then deploy/restart API and worker. Docker startup and the local runner already migrate. Data is shared in PostgreSQL across processes and instances. Existing records receive module/service labels; historical console output is not imported.
+
+`BACKEND_LOG_LEVEL=INFO` controls runtime capture; choose DEBUG, INFO, WARNING, ERROR or CRITICAL and restart to change it. Structured request/delivery records retain their own severity independently. Application Python logging (including library logs that propagate to the root logger, plus Uvicorn's logger) is captured while the runtime is active. Dedicated access logging is excluded because structured request events already exist. Logger namespaces configured elsewhere with propagation disabled and their own handlers are outside root capture.
+
+Configured credentials and common token/password/email/URL patterns are redacted. Database driver messages are replaced with a diagnostic label, and stack details include only exception types and frame filenames, function names and line numbers. Exception messages, source code lines, locals, SQL and parameters are omitted. Avoid logging sensitive data in application code: redaction provides defense in depth, not an excuse to log request or email bodies.
+
+Each process uses a bounded 2,000-event queue. Overflow reports a dropped-event warning; shutdown drains for up to three seconds. Logging writes have independent 500ms transaction limits, exclude their own diagnostics to prevent recursion, and cannot trigger mail retries on storage failure. Retention is seven days, with expired entries hidden immediately and pruned on writes at most hourly per process.
+
+Coverage is the application's API and worker runtimes. Render build logs, Docker daemon/container platform events, arbitrary stdout/stderr prints, host OS logs, PostgreSQL server logs, and failures before application logging starts are available in hosting/service consoles, not streamed into this page. Raw external log-file access is not exposed through the API.
