@@ -286,7 +286,7 @@ Set `FRONTEND_BASE_URL` to the public HTTPS frontend address. The header loads t
 
 ## Super Admin backend and system logs
 
-**Administration → Backend logs** combines structured requests with application/framework runtime logger events from API and email worker processes. Super Admin authorization is enforced by `logs.view` on `GET /api/v1/admin/backend-logs`; BDOs cannot access the endpoint. Filters include service (`api` / `email-worker`), Python module/logger name, category (all, requests, system, delivery), severity, text and a stable ID cursor. The eye action opens the message, metadata and sanitized exception stack frames. All times in the UI use Africa/Johannesburg. Auto-refresh updates the newest page every 15 seconds.
+**Administration → Backend logs** combines structured requests with application/framework runtime logger events from API and email worker processes. Super Admin authorization is enforced by `logs.view` on `GET /api/v1/admin/backend-logs`; BDOs cannot access the endpoint. Filters include service (`api` / `email-worker`), Python module/logger name, category (all, requests, system, delivery), severity, text and a stable ID cursor. The explorer groups records as module/service `.log` streams, with file filtering, retained-entry counts, modification times, a text preview and download. UTC timestamps appear in log text and SAST in modification labels. Auto-refresh updates the newest page every 15 seconds. Downloads include the latest 2,000 matching entries in chronological order and explicitly report truncation. No arbitrary server filesystem paths are accepted.
 
 Apply migrations through `e02a3404d005` with `python -m alembic upgrade head`, then deploy/restart API and worker. Docker startup and the local runner already migrate. Data is shared in PostgreSQL across processes and instances. Existing records receive module/service labels; historical console output is not imported.
 
@@ -306,3 +306,12 @@ Do not also deploy a separate worker unless intentionally running additional que
 
 
 Shared CRM visibility is a read-policy change and requires no new migration. Redeploy/restart the API and refresh the frontend to apply it. Contact/list/detail/export and lead/client endpoints and dashboard totals use the shared view. Authentication is still required; broader visibility grants no additional mutation or Super Admin permissions.
+
+
+## Calendar and diary
+
+Migration `f13b4505e006` adds `calendar_events`. Apply it before deploying the API (`python -m alembic upgrade head`); the Dockerfile and runner already migrate. `/api/v1/calendar/events` supports bounded overlap queries (up to 93 days, at most 1,000 results), creation, version-checked updates and deletion. `/api/v1/calendar/people` supplies active attendee names/IDs without exposing email addresses or account settings. Both CRM roles have `calendar.view` and `calendar.manage`; all signed-in users read the team diary, while changes require the organiser or Super Admin. Dates must be timezone-aware and increasing, with all-day boundaries at midnight SAST. Contact/product references and active attendees are validated. No external invitations or notifications are dispatched by these endpoints.
+
+Calendar events retain organiser attribution if an account is soft-deleted; Super Admins can continue managing those entries. Deleting a linked contact/product clears the optional reference without deleting the booking. The frontend overlays existing CRM follow-ups, supports in-app reminders while Calendar is open, and generates `.ics` downloads with UTC timed entries or exclusive all-day dates.
+
+System Logs explorer metadata is served by authenticated Super Admin-only `GET /api/v1/admin/backend-logs/files`; downloads use `GET /api/v1/admin/backend-logs/export`. The optional `module_exact` filter selects a precise logger stream while the existing `module` filter remains a text match. Listing, preview and export retain the same redaction and retention policies. Routine explorer polling is excluded from request capture to avoid self-generated noise. No files or services need to be started to run the isolated calendar/log unit tests.

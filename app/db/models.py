@@ -253,3 +253,26 @@ class BackendLog(Base):
     duration_ms: Mapped[float | None] = mapped_column(Float)
     error_type: Mapped[str | None] = mapped_column(String(100))
     outcome: Mapped[str | None] = mapped_column(String(20))
+
+
+class CalendarEvent(Record, Base):
+    __tablename__ = "calendar_events"
+    __table_args__ = (CheckConstraint("ends_at > starts_at", name="calendar_event_interval"),)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    title: Mapped[str] = mapped_column(String(160))
+    description: Mapped[str] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(String(20))
+    status: Mapped[str] = mapped_column(String(20))
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    all_day: Mapped[bool] = mapped_column(Boolean)
+    location: Mapped[str] = mapped_column(String(250))
+    meeting_url: Mapped[str] = mapped_column(String(1000))
+    contact_id: Mapped[str | None] = mapped_column(ForeignKey("contacts.id", ondelete="SET NULL"))
+    product_id: Mapped[str | None] = mapped_column(ForeignKey("products.id", ondelete="SET NULL"))
+    participant_ids: Mapped[list] = mapped_column(JSONB)
+    reminder_minutes: Mapped[int | None] = mapped_column()
+    version: Mapped[int] = mapped_column(default=1, server_default="1")

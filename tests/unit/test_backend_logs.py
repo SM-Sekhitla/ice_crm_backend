@@ -67,7 +67,7 @@ class LogStorageTests(unittest.IsolatedAsyncioTestCase):
 
 class LogApiTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.session = SimpleNamespace(scalars=AsyncMock(return_value=[]))
+        self.session = SimpleNamespace(scalars=AsyncMock(return_value=[]), execute=AsyncMock())
         self.app = FastAPI()
         self.app.include_router(router, prefix="/api/v1")
 
@@ -121,6 +121,50 @@ class LogApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("backend_logs.level =", sql)
         self.assertIn("backend_logs.source =", sql)
         self.assertNotIn("password", str(data))
+
+    async def test_log_file_browser_groups_only_retained_records(self):
+        self.app.dependency_overrides[current_user] = lambda: SimpleNamespace(role="Super Admin")
+        self.session.execute.side_effect = [[("app.api.crm", 5, now())], [("api", 5, now())]]
+        response = await self.client.get("/api/v1/admin/backend-logs/files")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["folders"]["modules"][0]["name"], "app.api.crm.log")
+        self.assertEqual(response.json()["folders"]["services"][0]["entries"], 5)
+        self.assertIn("created_at >=", str(self.session.execute.call_args.args[0]))
+
+    async def test_log_export_uses_exact_module_filters_and_plain_text(self):
+        self.app.dependency_overrides[current_user] = lambda: SimpleNamespace(role="Super Admin")
+        self.session.scalars.return_value = [
+            BackendLog(
+                id=1,
+                created_at=now(),
+                source="api",
+                service="api",
+                module="app.api.crm",
+                level="INFO",
+                event="http_request",
+                message="HTTP request completed",
+                status_code=200,
+            )
+        ]
+        response = await self.client.get("/api/v1/admin/backend-logs/export?module_exact=app.api.crm")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["filename"], "app.api.crm.log")
+        self.assertIn("status=200", response.json()["content"])
+        self.assertFalse(response.json()["truncated"])
+        self.assertIn("coalesce(backend_logs.module", str(self.session.scalars.call_args.args[0]))
+        response = await self.client.get(
+            "/api/v1/admin/backend-logs/export", params={"module_exact": "../../etc/passwd"}
+        )
+        self.assertEqual(response.status_code, 422)
+
+    async def test_file_listing_and_download_require_super_admin(self):
+        for path in ("files", "export"):
+            response = await self.client.get("/api/v1/admin/backend-logs/" + path)
+            self.assertEqual(response.status_code, 401)
+        self.app.dependency_overrides[current_user] = lambda: SimpleNamespace(role="BDO")
+        for path in ("files", "export"):
+            response = await self.client.get("/api/v1/admin/backend-logs/" + path)
+            self.assertEqual(response.status_code, 403)
 
     async def test_service_module_category_filters_are_applied(self):
         self.app.dependency_overrides[current_user] = lambda: SimpleNamespace(role="Super Admin")

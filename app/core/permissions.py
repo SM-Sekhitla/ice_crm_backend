@@ -3,6 +3,8 @@ BDO = "BDO"
 PERMISSIONS = {
     ADMIN: {
         "contacts.view",
+        "calendar.view",
+        "calendar.manage",
         "contacts.create",
         "contacts.edit",
         "contacts.delete",
@@ -17,6 +19,8 @@ PERMISSIONS = {
     },
     BDO: {
         "contacts.view",
+        "calendar.view",
+        "calendar.manage",
         "contacts.create",
         "contacts.edit",
         "leads.manage",

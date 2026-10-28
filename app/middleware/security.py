@@ -123,7 +123,7 @@ class SecurityMiddleware:
         finally:
             route = getattr(scope.get("route"), "path", None)
             if not scope["path"].startswith("/health/") and (
-                route != "/api/v1/admin/backend-logs" or status_code >= 400
+                not (route or "").startswith("/api/v1/admin/backend-logs") or status_code >= 400
             ):
                 await record_backend_log(
                     "http_request",
