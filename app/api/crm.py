@@ -22,18 +22,18 @@ from app.api.schemas import (
 )
 from app.core.permissions import ADMIN
 from app.core.security import now
-from app.db.models import Activity, Assignment, Association, Client, Contact, FollowUp, Lead, Product
+from app.db.models import Activity, Association, Client, Contact, FollowUp, Lead, Product
 from app.services.common import audit, serialize
 
 router = APIRouter(tags=["CRM"])
 
 
-async def contact_record(session, user, contact_id):
+async def contact_record(session, user, contact_id, *, write=True):
     record = await session.scalar(
         select(Contact).where(
             Contact.id == contact_id,
             True
-            if user.role == ADMIN
+            if not write or user.role == ADMIN
             else Contact.id.in_(select(Association.contact_id).where(association_scope(user))),
         )
     )
@@ -45,10 +45,6 @@ async def contact_record(session, user, contact_id):
 @router.get("/products")
 async def products(session: Session, user: CurrentUser):
     query = select(Product).order_by(Product.name)
-    if user.role != ADMIN:
-        query = query.where(
-            Product.id.in_(select(Assignment.product_id).where(Assignment.user_id == user.id))
-        )
     return [serialize(r) for r in await session.scalars(query)]
 
 
@@ -62,14 +58,13 @@ async def contacts(
     offset: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
 ):
-    associations = select(Association.contact_id).where(association_scope(user))
+    associations = select(Association.contact_id)
     if product_id:
-        await product_access(session, user, product_id)
         associations = associations.where(Association.product_id == product_id)
     if stage:
         associations = associations.where(Association.stage == stage)
     query = select(Contact)
-    if user.role != ADMIN or product_id or stage:
+    if product_id or stage:
         query = query.where(Contact.id.in_(associations))
     if q:
         query = query.where(
@@ -110,7 +105,7 @@ async def create_contact(body: ContactCreate, session: Session, user=Depends(req
 
 @router.get("/contacts/{contact_id}")
 async def get_contact(contact_id: str, session: Session, user=Depends(require("contacts.view"))):
-    return serialize(await contact_record(session, user, contact_id))
+    return serialize(await contact_record(session, user, contact_id, write=False))
 
 
 @router.put("/contacts/{contact_id}")
@@ -137,7 +132,7 @@ async def delete_contact(contact_id: str, session: Session, user=Depends(require
 async def associations(
     session: Session, user: CurrentUser, contact_id: str | None = Query(None, alias="contactId")
 ):
-    query = select(Association).where(association_scope(user))
+    query = select(Association)
     if contact_id:
         query = query.where(Association.contact_id == contact_id)
     return [serialize(r) for r in await session.scalars(query)]
@@ -258,35 +253,18 @@ async def transition(
 
 @router.get("/leads")
 async def leads(session: Session, user: CurrentUser):
-    return [
-        serialize(r)
-        for r in await session.scalars(
-            select(Lead).where(Lead.association_id.in_(select(Association.id).where(association_scope(user))))
-        )
-    ]
+    return [serialize(record) for record in await session.scalars(select(Lead))]
 
 
 @router.get("/clients")
 async def clients(session: Session, user: CurrentUser):
-    return [
-        serialize(r)
-        for r in await session.scalars(
-            select(Client).where(
-                Client.association_id.in_(select(Association.id).where(association_scope(user)))
-            )
-        )
-    ]
+    return [serialize(record) for record in await session.scalars(select(Client))]
 
 
 @router.get("/follow-ups")
 async def followups(session: Session, user: CurrentUser):
     return [
-        serialize(r)
-        for r in await session.scalars(
-            select(FollowUp)
-            .where(FollowUp.association_id.in_(select(Association.id).where(association_scope(user))))
-            .order_by(FollowUp.due_date)
-        )
+        serialize(record) for record in await session.scalars(select(FollowUp).order_by(FollowUp.due_date))
     ]
 
 
@@ -340,10 +318,7 @@ async def edit_followup(
 async def activities(session: Session, user: CurrentUser, limit: int = Query(100, ge=1, le=500)):
     query = select(Activity)
     if user.role != ADMIN:
-        query = query.where(
-            Activity.user_id == user.id,
-            Activity.product_id.in_(select(Assignment.product_id).where(Assignment.user_id == user.id)),
-        )
+        query = query.where(or_(Activity.contact_id.is_not(None), Activity.user_id == user.id))
     return [
         serialize(r) for r in await session.scalars(query.order_by(Activity.created_at.desc()).limit(limit))
     ]
@@ -351,16 +326,14 @@ async def activities(session: Session, user: CurrentUser, limit: int = Query(100
 
 @router.get("/dashboard")
 async def dashboard(session: Session, user: CurrentUser):
-    scope = select(Association.id).where(association_scope(user))
+    scope = select(Association.id)
     counts = {}
     for name, model in [("leads", Lead), ("clients", Client), ("followUps", FollowUp)]:
         query = select(func.count()).select_from(model).where(model.association_id.in_(scope))
         if model == FollowUp:
             query = query.where(FollowUp.status == "Open")
         counts[name] = await session.scalar(query)
-    counts["contacts"] = await session.scalar(
-        select(func.count(func.distinct(Association.contact_id))).where(association_scope(user))
-    )
+    counts["contacts"] = await session.scalar(select(func.count()).select_from(Contact))
     counts["pipelineValue"] = await session.scalar(
         select(func.coalesce(func.sum(Lead.expected_value), 0)).where(
             Lead.association_id.in_(scope), Lead.converted_at.is_(None)

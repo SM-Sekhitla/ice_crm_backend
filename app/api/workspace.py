@@ -1,10 +1,10 @@
-"""Authoritative scoped workspace for the existing CRM collection-based UI."""
+"""Shared CRM records with separately scoped administration and campaign data."""
 
 from fastapi import APIRouter
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from app.api.auth import user_response
-from app.api.deps import CurrentUser, Session, association_scope
+from app.api.deps import CurrentUser, Session
 from app.core.config import get_settings
 from app.core.permissions import ADMIN
 from app.db.models import (
@@ -36,22 +36,20 @@ async def workspace(session: Session, user: CurrentUser):
     from sqlalchemy import text
 
     await session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"))
-    association_ids = select(Association.id).where(association_scope(user))
-    contact_ids = select(Association.contact_id).where(association_scope(user))
     product_ids = select(Assignment.product_id).where(Assignment.user_id == user.id)
     admin = user.role == ADMIN
-    products = select(Product).where(True if admin else Product.id.in_(product_ids))
+    products = select(Product)
     campaigns = select(Campaign).where(
         True if admin else (Campaign.created_by == user.id) & Campaign.product_id.in_(product_ids)
     )
     campaign_ids = campaigns.with_only_columns(Campaign.id)
     records = {
         "products": products,
-        "contacts": select(Contact).where(True if admin else Contact.id.in_(contact_ids)),
-        "associations": select(Association).where(association_scope(user)),
-        "leads": select(Lead).where(Lead.association_id.in_(association_ids)),
-        "clients": select(Client).where(Client.association_id.in_(association_ids)),
-        "followUps": select(FollowUp).where(FollowUp.association_id.in_(association_ids)),
+        "contacts": select(Contact),
+        "associations": select(Association),
+        "leads": select(Lead),
+        "clients": select(Client),
+        "followUps": select(FollowUp),
         "campaigns": campaigns,
         "campaignRecipients": select(Recipient).where(Recipient.campaign_id.in_(campaign_ids)),
         "senders": select(Sender).where(True if admin else Sender.user_ids.contains([user.id])),
@@ -61,7 +59,7 @@ async def workspace(session: Session, user: CurrentUser):
             True if admin else AudienceSegment.product_id.in_(product_ids),
         ),
         "activities": select(Activity).where(
-            True if admin else (Activity.user_id == user.id) & Activity.product_id.in_(product_ids)
+            True if admin else or_(Activity.contact_id.is_not(None), Activity.user_id == user.id)
         ),
     }
     settings = get_settings()
@@ -101,6 +99,26 @@ async def workspace(session: Session, user: CurrentUser):
                 person["invitationReason"] = invitation.delivery_reason
                 person["invitationExpiresAt"] = invitation.expires_at
     else:
-        # Only the logged-in identity is needed for BDO edits. Do not expose the staff directory.
+        # Owner labels are shared with CRM records, not private account/invitation details.
         data["users"] = [await user_response(session, user)]
+        owner_ids = select(Association.owner_id).union(
+            select(Product.owner_id),
+            select(FollowUp.owner_id),
+            select(Activity.user_id).where(Activity.contact_id.is_not(None)),
+        )
+        owners = await session.scalars(
+            select(User).where(User.id.in_(owner_ids), User.id != user.id).order_by(User.id)
+        )
+        data["users"].extend(
+            {
+                "id": owner.id,
+                "firstName": owner.first_name,
+                "lastName": owner.last_name,
+                "email": "",
+                "role": owner.role,
+                "productIds": [],
+                "active": owner.active,
+            }
+            for owner in owners
+        )
     return data

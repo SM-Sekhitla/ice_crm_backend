@@ -8,10 +8,9 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.api.crm import contact_record, create_contact
-from app.api.deps import Session, association_scope, require
+from app.api.deps import Session, require
 from app.api.schemas import BulkDelete, BulkTags, ContactImport
-from app.core.permissions import ADMIN
-from app.db.models import Association, Contact
+from app.db.models import Contact
 from app.services.common import audit
 
 router = APIRouter(prefix="/contacts", tags=["Contact import and export"])
@@ -50,8 +49,6 @@ async def bulk_tags(body: BulkTags, session: Session, user=Depends(require("cont
 @router.get("/export")
 async def export_contacts(session: Session, user=Depends(require("contacts.view"))):
     query = select(Contact).order_by(Contact.email).limit(10000)
-    if user.role != ADMIN:
-        query = query.where(Contact.id.in_(select(Association.contact_id).where(association_scope(user))))
     output = io.StringIO()
     writer = csv.writer(output)
     fields = ["first_name", "last_name", "email", "company", "phone", "consent", "do_not_email"]

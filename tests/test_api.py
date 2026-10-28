@@ -60,16 +60,18 @@ async def test_password_change_revokes_sessions(client):
     ).status_code == 200
 
 
-async def test_bdo_product_and_contact_isolation(client):
+async def test_bdo_shared_crm_reads_and_retained_write_permissions(client):
     admin = await headers(client)
     bdo = await headers(client, "bdo@example.com")
     other = await contact(client, admin, "other-contact@example.com", "p2", "other")
     assert (await client.get("/api/v1/products", headers=bdo)).json()[0]["id"] == "p1"
-    assert len((await client.get("/api/v1/products", headers=bdo)).json()) == 1
-    assert (await client.get("/api/v1/contacts/" + other["id"], headers=bdo)).status_code == 404
+    assert len((await client.get("/api/v1/products", headers=bdo)).json()) == 2
+    assert (await client.get("/api/v1/contacts/" + other["id"], headers=bdo)).status_code == 200
     assert (await client.delete("/api/v1/contacts/" + other["id"], headers=bdo)).status_code == 403
     assert (await client.get("/api/v1/users", headers=bdo)).status_code == 403
-    assert (await client.get("/api/v1/contacts", headers=bdo)).json()["total"] == 0
+    assert (await client.get("/api/v1/contacts", headers=bdo)).json()["total"] == 1
+    assert (await client.get("/api/v1/contacts?productId=p2", headers=bdo)).json()["total"] == 1
+    assert len((await client.get("/api/v1/associations", headers=bdo)).json()) == 1
     bad = await client.post(
         "/api/v1/contacts",
         headers=bdo,
@@ -403,9 +405,13 @@ async def test_workspace_scope_and_empty_database_collections(client):
     await contact(client, admin, "own-workspace@example.com")
     await contact(client, admin, "hidden-workspace@example.com", "p2", "other")
     scoped = (await client.get("/api/v1/workspace", headers=bdo)).json()
-    assert len(scoped["products"]) == 1
-    assert [person["id"] for person in scoped["users"]] == ["bdo"]
-    assert [person["email"] for person in scoped["contacts"]] == ["own-workspace@example.com"]
+    assert len(scoped["products"]) == 2
+    assert {person["id"] for person in scoped["users"]} == {"bdo", "admin", "other"}
+    assert all(person["email"] == "" for person in scoped["users"] if person["id"] != "bdo")
+    assert {person["email"] for person in scoped["contacts"]} == {
+        "own-workspace@example.com",
+        "hidden-workspace@example.com",
+    }
     assert "passwordHash" not in str(scoped)
     assert "tokenVersion" not in str(scoped)
     complete = (await client.get("/api/v1/workspace", headers=admin)).json()
