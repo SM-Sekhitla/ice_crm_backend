@@ -10,6 +10,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Index,
+    LargeBinary,
     Numeric,
     String,
     Text,
@@ -276,3 +277,13 @@ class CalendarEvent(Record, Base):
     participant_ids: Mapped[list] = mapped_column(JSONB)
     reminder_minutes: Mapped[int | None] = mapped_column()
     version: Mapped[int] = mapped_column(default=1, server_default="1")
+
+
+class EmailImage(Base):
+    """Durable, opaque public assets needed by email clients; no user data."""
+
+    __tablename__ = "email_images"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    content_type: Mapped[str] = mapped_column(String(30))
+    data: Mapped[bytes] = mapped_column(LargeBinary)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

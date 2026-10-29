@@ -270,12 +270,9 @@ Apply the new migration with `alembic upgrade head` before API restart, or run `
 
 Brevo campaign senders are not restricted to BREVO_FROM_EMAIL. The selected CRM sender is sent in the transactional API sender object, as supported by [Brevo's reference](https://developers.brevo.com/reference/send-transac-email). Verification status, product assignments and BDO user assignments are still enforced. A provider-side verification badge does not automatically import a sender into this CRM or grant product/user access. Environment sender defaults continue to apply to system invitations.
 
-## Preparing uploaded signature images for Brevo
+## Automatic signature image delivery
 
-In Compose or the launch confirmation, use **Prepare images for Brevo**. Download each detected image, upload it to your Brevo Content library or website, and paste its direct public HTTPS image URL. The CRM replaces only the image sources, preserves inline formatting, updates the saved signature through `PUT /signatures/{id}`, and saves the campaign draft. Previously submitted campaign snapshots remain unchanged. The final launch is still a separate confirmed action.
-
-The API does not pretend an ordinary attachment is an inline CID image. Brevo's [image gallery API](https://developers.brevo.com/reference/upload-image-to-gallery) takes an existing public image URL, not a local/base64 file. In local development, the CRM cannot create a public HTTPS URL for an uploaded image automatically. Use the provider's [Content library upload](https://help.brevo.com/hc/en-us/articles/4504463584786-Add-and-manage-images-in-the-Content-library) or your own image hosting, then supply the direct URL. URL format checks do not verify that a remote file is reachable. The server never fetches arbitrary image URLs.
-
+Upload and repair signature images in the CRM. SMTP prepares inline MIME images, and Brevo publishes image bytes through the CRM's public HTTPS image endpoint. See **Uploaded signature images** below for deployment settings. No Brevo library upload is required.
 
 ## Invitation email design
 
@@ -315,3 +312,9 @@ Migration `f13b4505e006` adds `calendar_events`. Apply it before deploying the A
 Calendar events retain organiser attribution if an account is soft-deleted; Super Admins can continue managing those entries. Deleting a linked contact/product clears the optional reference without deleting the booking. The frontend overlays existing CRM follow-ups, supports in-app reminders while Calendar is open, and generates `.ics` downloads with UTC timed entries or exclusive all-day dates.
 
 System Logs explorer metadata is served by authenticated Super Admin-only `GET /api/v1/admin/backend-logs/files`; downloads use `GET /api/v1/admin/backend-logs/export`. The optional `module_exact` filter selects a precise logger stream while the existing `module` filter remains a text match. Listing, preview and export retain the same redaction and retention policies. Routine explorer polling is excluded from request capture to avoid self-generated noise. No files or services need to be started to run the isolated calendar/log unit tests.
+
+### Uploaded signature images
+
+Upload HTML signatures and replace missing local images inside the CRM. SMTP sends uploaded images as inline MIME images. Brevo API delivery automatically publishes embedded images to PostgreSQL and replaces them with public HTTPS CRM URLs; no Brevo library upload is needed. Remote HTTPS images remain unchanged. Set `EMAIL_IMAGE_BASE_URL=https://your-backend.onrender.com` if the frontend does not proxy `/api`; otherwise the existing public HTTPS `FRONTEND_BASE_URL` is used. Do not include `/api/v1` in that setting. Apply migrations before deployment. The API must remain publicly reachable by recipients and email image proxies.
+
+Published images are public to anyone holding their opaque URL, and remain available for previously sent mail even if a signature is edited/deleted. Only image bytes are public, never the signature HTML or CRM records. PostgreSQL backups preserve the images across restarts and deployments. Mail clients may still ask recipients to allow images. No messages are sent by previewing or saving a signature.

@@ -5,6 +5,8 @@ import re
 import httpx
 
 from app.core.config import get_settings
+from app.db.session import SessionLocal
+from app.services.email_images import EMBEDDED_IMAGE, image_base_url, publish_images
 
 BREVO_API_URL = "https://api.brevo.com/v3/smtp/email"
 
@@ -17,10 +19,11 @@ def validate_provider_message(sender, body):
     settings = get_settings()
     if settings.email_provider != "brevo":
         return
-    if re.search(r"<img\b[^>]*\bsrc=[\"\']data:image/", body, re.IGNORECASE):
-        raise DeliveryRejected(
-            "Prepare the embedded images for Brevo in the campaign editor before launching"
-        )
+    if EMBEDDED_IMAGE.search(body):
+        try:
+            image_base_url(settings)
+        except ValueError as exc:
+            raise DeliveryRejected(str(exc)) from exc
 
 
 async def brevo_send(sender, recipient, subject, body, recipient_id):
@@ -30,6 +33,10 @@ async def brevo_send(sender, recipient, subject, body, recipient_id):
     if not settings.brevo_api_key.strip() or not sender.email:
         raise DeliveryRejected("Brevo sender configuration is incomplete")
     validate_provider_message(sender, body)
+    # Commit before sending: image URLs must work as soon as the email arrives.
+    if EMBEDDED_IMAGE.search(body):
+        async with SessionLocal() as session, session.begin():
+            body = await publish_images(session, body, settings)
     payload = {
         "sender": {"name": sender.sender_name or settings.brevo_from_name, "email": sender.email},
         "to": [{"email": recipient}],

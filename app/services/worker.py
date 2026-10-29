@@ -5,9 +5,7 @@ and are never retried automatically, to avoid duplicate messages.
 """
 
 import asyncio
-import base64
 import logging
-import re
 import signal
 import smtplib
 import ssl
@@ -23,6 +21,7 @@ from app.db.models import Campaign, Product, Recipient, Sender, User
 from app.db.session import SessionLocal, engine
 from app.services.backend_logs import record_backend_log
 from app.services.email import DeliveryRejected, brevo_send
+from app.services.email_images import inline_images
 from app.services.email_html import personalize, sanitize_html
 from app.services.invitations import process_invitation, recover_invitation_dispatches
 from app.services.runtime_logging import RuntimeLogCapture
@@ -40,19 +39,14 @@ def smtp_send(sender, recipient, subject, body, recipient_id):
     message["Reply-To"] = sender.reply_to
     message["Subject"] = subject
     message["Message-ID"] = f"<{recipient_id}@ice-crm.local>"
-    embedded = []
-
-    def replace_image(match):
-        content_type, data = match[1], match[2]
-        cid = f"image-{len(embedded)}-{recipient_id}"
-        embedded.append((cid, content_type, base64.b64decode(data)))
-        return f'src="cid:{cid}"'
-
-    body = re.sub(r'src="data:image/(png|jpeg|gif|webp);base64,([A-Za-z0-9+/=]+)"', replace_image, body)
+    body, embedded = inline_images(body, recipient_id)
     message.set_content("This message contains HTML. Please view it in an HTML-capable email client.")
     message.add_alternative(body, subtype="html")
     for cid, subtype, data in embedded:
-        message.get_payload()[1].add_related(data, maintype="image", subtype=subtype, cid=f"<{cid}>")
+        message.get_payload()[1].add_related(
+            data, maintype="image", subtype=subtype, cid=f"<{cid}>",
+            disposition="inline", filename=f"signature-{cid.split('@')[0]}.{subtype}",
+        )
     client_type = smtplib.SMTP_SSL if settings.smtp_ssl else smtplib.SMTP
     kwargs = {"timeout": 30}
     if settings.smtp_ssl:

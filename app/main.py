@@ -9,7 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from app.api import admin, auth, backend_logs, calendar, campaigns, crm, imports, workspace
+from app.api import admin, auth, backend_logs, calendar, campaigns, crm, email_images, imports, workspace
 from app.core.config import get_settings
 from app.db.session import engine
 from app.middleware.security import SecurityMiddleware
@@ -77,6 +77,7 @@ def create_app():
     for router in (
         auth.router,
         calendar.router,
+        email_images.router,
         backend_logs.router,
         admin.router,
         imports.router,

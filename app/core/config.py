@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     smtp_starttls: bool = True
     smtp_ssl: bool = False
     frontend_base_url: str = "http://localhost:5173"
+    email_image_base_url: str = ""
     invitation_expiry_hours: int = Field(24, ge=1, le=168)
     smtp_from_email: str = ""
     smtp_from_name: str = "ICE Business Development"
