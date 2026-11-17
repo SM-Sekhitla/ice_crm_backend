@@ -34,7 +34,8 @@ async def contact_record(session, user, contact_id, *, write=True):
             Contact.id == contact_id,
             True
             if not write or user.role == ADMIN
-            else Contact.id.in_(select(Association.contact_id).where(association_scope(user))),
+            else (Contact.captured_by == user.id)
+            | Contact.id.in_(select(Association.contact_id).where(association_scope(user))),
         )
     )
     if not record:

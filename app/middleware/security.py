@@ -58,8 +58,11 @@ class SecurityMiddleware:
 
         if oversized:
             return await reject(413, "Request body too large")
-        if scope["path"].startswith("/api/v1/auth/") and scope["method"] == "POST":
-            key = (scope.get("client") or ("unknown",))[0]  # No trust in forwarded IPs.
+        is_auth = scope["path"].startswith("/api/v1/auth/") and scope["method"] == "POST"
+        is_intake = scope["path"].startswith("/api/v1/public/contact-intake/")
+        if is_auth or is_intake:
+            client_ip = (scope.get("client") or ("unknown",))[0]  # No trust in forwarded IPs.
+            key = ("intake" if is_intake else "auth", client_ip)
             timestamp = time.monotonic()
             if timestamp - self.last_cleanup > 60:
                 self.attempts = defaultdict(
@@ -69,8 +72,8 @@ class SecurityMiddleware:
             attempts = self.attempts[key]
             while attempts and attempts[0] <= timestamp - 60:
                 attempts.popleft()
-            if len(attempts) >= settings.auth_rate_limit:
-                return await reject(429, "Too many authentication attempts", [(b"retry-after", b"60")])
+            if len(attempts) >= (60 if is_intake else settings.auth_rate_limit):
+                return await reject(429, "Too many requests. Please try again shortly.", [(b"retry-after", b"60")])
             attempts.append(timestamp)
         # Buffer up to the limit before routing; chunked requests cannot bypass limits.
         chunks = []

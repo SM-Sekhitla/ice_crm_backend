@@ -10,6 +10,7 @@ from app.db.models import (
     Association,
     AudienceSegment,
     Campaign,
+    Contact,
     FollowUp,
     Product,
     Recipient,
@@ -152,6 +153,9 @@ async def delete_user_account(session, actor, user_id, replacement_id=None):
     record.token_version += 1
     record.password_hash = "!deleted"
     # Free the old address for a new invitation without reusing the deleted user's ID/history.
+    await session.execute(
+        update(Contact).where(Contact.captured_by == record.id).values(captured_by=replacement.id)
+    )
     record.email = f"deleted-{record.id}@users.invalid"
     audit(
         session, actor, f"Deleted user account {record.first_name} {record.last_name}; ownership reassigned"

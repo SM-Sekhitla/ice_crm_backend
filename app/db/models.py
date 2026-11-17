@@ -74,6 +74,7 @@ class Assignment(Base):
 
 class Contact(Record, Base):
     __tablename__ = "contacts"
+    captured_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     first_name: Mapped[str] = mapped_column(String(100))
     last_name: Mapped[str] = mapped_column(String(100))
     email: Mapped[str] = mapped_column(String(254), unique=True)
@@ -287,3 +288,13 @@ class EmailImage(Base):
     content_type: Mapped[str] = mapped_column(String(30))
     data: Mapped[bytes] = mapped_column(LargeBinary)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ContactIntakeLink(Base):
+    __tablename__ = "contact_intake_links"
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    digest: Mapped[str] = mapped_column(String(64), unique=True)
+    encrypted_token: Mapped[str] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    window_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    submission_count: Mapped[int] = mapped_column(default=0)
